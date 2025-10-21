@@ -1,15 +1,67 @@
 "use client";
 
 import React, { useState } from "react";
-import { FileText, Download, Copy, Check, FileDown } from "lucide-react";
+import {
+  FileText,
+  Download,
+  Copy,
+  Check,
+  FileDown,
+  Edit3,
+  X,
+  Save,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
+
+interface Field {
+  number: number;
+  name: string;
+  isPK: string;
+  isFK: string;
+  isMandatory: string;
+  type: string;
+  typeCategory: string;
+  origin: string;
+  formula: string;
+  description: string;
+}
+
+interface Table {
+  name: string;
+  description: string;
+  columnCount: number;
+  rowCount: string;
+  fields: Field[];
+}
 
 export default function PrismaDataDictionary() {
   const [schema, setSchema] = useState("");
-  const [tables, setTables] = useState([]);
+  const [tables, setTables] = useState<Table[]>([]);
   const [copied, setCopied] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editingDescriptions, setEditingDescriptions] = useState<
+    Record<string, string>
+  >({});
 
-  const parseSchema = (schemaText) => {
-    const models = [];
+  const parseSchema = (schemaText: string) => {
+    const models: Table[] = [];
     const modelRegex = /model\s+(\w+)\s*{([^}]*)}/g;
     let match;
 
@@ -17,7 +69,7 @@ export default function PrismaDataDictionary() {
       const modelName = match[1];
       const modelBody = match[2];
 
-      const fields = [];
+      const fields: Field[] = [];
       const fieldLines = modelBody
         .split("\n")
         .filter(
@@ -60,7 +112,7 @@ export default function PrismaDataDictionary() {
           const description = descMatch ? descMatch[1].trim() : "";
 
           // Map Prisma types to SQL types
-          const typeMapping = {
+          const typeMapping: Record<string, string> = {
             String: "VARCHAR",
             Int: "INTEGER",
             BigInt: "BIGINT",
@@ -125,6 +177,47 @@ export default function PrismaDataDictionary() {
   const handleGenerate = () => {
     if (schema.trim()) {
       parseSchema(schema);
+      // Initialize editing descriptions with current descriptions
+      const initialDescriptions: Record<string, string> = {};
+      const models: Table[] = [];
+      const modelRegex = /model\s+(\w+)\s*{([^}]*)}/g;
+      let match;
+
+      while ((match = modelRegex.exec(schema)) !== null) {
+        const modelName = match[1];
+        const modelBody = match[2];
+        const fields: Field[] = [];
+        const fieldLines = modelBody
+          .split("\n")
+          .filter(
+            (line) =>
+              line.trim() &&
+              !line.trim().startsWith("//") &&
+              !line.trim().startsWith("@@")
+          );
+
+        let fieldNumber = 1;
+        fieldLines.forEach((line) => {
+          const trimmed = line.trim();
+          if (!trimmed) return;
+
+          const fieldMatch = trimmed.match(/(\w+)\s+(\w+)(\[\])?(\?)?(.*)$/);
+          if (fieldMatch) {
+            const [, fieldName, fieldType] = fieldMatch;
+            const descMatch = modelBody.match(
+              new RegExp(`///\\s*(.*)\\n.*${fieldName}\\s+${fieldType}`)
+            );
+            const description = descMatch
+              ? descMatch[1].trim()
+              : `Campo ${fieldName} da tabela ${modelName}`;
+
+            const key = `${modelName}_${fieldName}`;
+            initialDescriptions[key] = description;
+          }
+        });
+      }
+
+      setEditingDescriptions(initialDescriptions);
     }
   };
 
@@ -166,6 +259,43 @@ export default function PrismaDataDictionary() {
     navigator.clipboard.writeText(markdown);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleEditDescriptions = () => {
+    setShowEditModal(true);
+  };
+
+  const handleSaveDescriptions = () => {
+    // Update tables with new descriptions
+    const updatedTables = tables.map((table) => {
+      const tableName = table.name.toLowerCase();
+      const updatedFields = table.fields.map((field) => {
+        const key = `${tableName}_${field.name}`;
+        return {
+          ...field,
+          description: editingDescriptions[key] || field.description,
+        };
+      });
+      return {
+        ...table,
+        fields: updatedFields,
+      };
+    });
+
+    setTables(updatedTables);
+    setShowEditModal(false);
+  };
+
+  const handleDescriptionChange = (
+    tableName: string,
+    fieldName: string,
+    newDescription: string
+  ) => {
+    const key = `${tableName}_${fieldName}`;
+    setEditingDescriptions((prev) => ({
+      ...prev,
+      [key]: newDescription,
+    }));
   };
 
   const handleDownloadPDF = () => {
@@ -288,216 +418,314 @@ export default function PrismaDataDictionary() {
         }, 500);
       };
     } catch (error) {
-      alert("Erro ao exportar PDF: " + error.message);
+      alert("Erro ao exportar PDF: " + (error as Error).message);
     }
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-6">
-      <div className="max-w-7xl mx-auto">
-        <div className="bg-white rounded-lg shadow-xl p-8 mb-6">
-          <div className="flex items-center gap-3 mb-6">
-            <FileText className="w-8 h-8 text-indigo-600" />
-            <h1 className="text-3xl font-bold text-gray-800">
-              Gerador de Dicionário de Dados
-            </h1>
-          </div>
-
-          <p className="text-gray-600 mb-6">
-            Cole seu schema do Prisma abaixo e gere automaticamente um
-            dicionário de dados no formato da controladoria.
-          </p>
-
-          <div className="mb-6">
-            <label className="block text-sm font-semibold text-gray-700 mb-2">
-              Schema do Prisma
-            </label>
-            <textarea
-              value={schema}
-              onChange={(e) => setSchema(e.target.value)}
-              placeholder="Cole seu schema do Prisma aqui...&#10;&#10;Exemplo:&#10;model User {&#10;  id Int @id @default(autoincrement())&#10;  email String @unique&#10;  name String?&#10;  posts Post[]&#10;}"
-              className="w-full h-64 p-4 border-2 border-gray-300 rounded-lg font-mono text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 transition-all"
-            />
-          </div>
-
-          <button
-            onClick={handleGenerate}
-            className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 px-6 rounded-lg transition-colors shadow-md hover:shadow-lg"
-          >
-            Gerar Dicionário de Dados
-          </button>
-        </div>
-
-        {tables.length > 0 && (
-          <div className="bg-white rounded-lg shadow-xl p-8">
-            <div className="flex justify-between items-center mb-6">
-              <h2 className="text-2xl font-bold text-gray-800">
-                Dicionário de Dados Gerado
-              </h2>
-              <div className="flex gap-3">
-                <button
-                  onClick={handleCopy}
-                  className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-4 rounded-lg transition-colors"
-                >
-                  {copied ? (
-                    <Check className="w-5 h-5" />
-                  ) : (
-                    <Copy className="w-5 h-5" />
-                  )}
-                  {copied ? "Copiado!" : "Copiar"}
-                </button>
-                <button
-                  onClick={handleDownloadPDF}
-                  className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white font-semibold py-2 px-4 rounded-lg transition-colors"
-                >
-                  <FileDown className="w-5 h-5" />
-                  Exportar PDF
-                </button>
+    <div className="min-h-screen bg-gray-50 p-6">
+      <div className="max-w-7xl mx-auto space-y-6">
+        <Card>
+          <CardHeader>
+            <div className="flex items-center gap-3">
+              <FileText className="w-8 h-8 text-primary" />
+              <div>
+                <CardTitle className="text-3xl">
+                  Gerador de Dicionário de Dados
+                </CardTitle>
+                <CardDescription className="text-base mt-2">
+                  Cole seu schema do Prisma abaixo e gere automaticamente um
+                  dicionário de dados no formato da controladoria.
+                </CardDescription>
               </div>
             </div>
+          </CardHeader>
+          <CardContent>
+            <div className="mb-6">
+              <label className="block text-sm font-semibold text-foreground mb-2">
+                Schema do Prisma
+              </label>
+              <Textarea
+                value={schema}
+                onChange={(e) => setSchema(e.target.value)}
+                placeholder="Cole seu schema do Prisma aqui...&#10;&#10;Exemplo:&#10;model User {&#10;  id Int @id @default(autoincrement())&#10;  email String @unique&#10;  name String?&#10;  posts Post[]&#10;}"
+                className="w-full h-64 font-mono text-sm"
+              />
+            </div>
 
-            {tables.map((table, idx) => (
-              <div
-                key={idx}
-                className="mb-12 border-b-2 border-gray-200 pb-8 last:border-b-0"
-              >
-                <div className="bg-indigo-50 p-4 rounded-lg mb-6">
-                  <h3 className="text-xl font-bold text-indigo-900 mb-2">
-                    Tabela {String(idx + 1).padStart(3, "0")}
-                  </h3>
-                  <p className="text-sm text-gray-600 mb-1">
-                    <span className="font-semibold">Nome da Tabela:</span>{" "}
-                    {table.name}
-                  </p>
-                  <p className="text-sm text-gray-600 mb-1">
-                    <span className="font-semibold">Descrição:</span>{" "}
-                    {table.description}
-                  </p>
-                  <p className="text-sm text-gray-600 mb-1">
-                    <span className="font-semibold">Número de Colunas:</span>{" "}
-                    {table.columnCount}
-                  </p>
-                  <p className="text-sm text-gray-600">
-                    <span className="font-semibold">
-                      Número de Linhas (atual):
-                    </span>{" "}
-                    {table.rowCount}
-                  </p>
-                  <p className="text-xs text-gray-500 mt-3">
-                    PK = Primary Key | FK = Foreign Key | M = Mandatory
-                  </p>
-                </div>
+            <Button onClick={handleGenerate} className="w-full" size="lg">
+              Gerar Dicionário de Dados
+            </Button>
+          </CardContent>
+        </Card>
 
-                <h4 className="font-bold text-lg mb-3 text-gray-800">
-                  Colunas
-                </h4>
-                <div className="overflow-x-auto mb-6">
-                  <table className="w-full text-sm border-collapse">
-                    <thead>
-                      <tr className="bg-gray-100">
-                        <th className="border border-gray-300 px-3 py-2 text-left">
-                          No.
-                        </th>
-                        <th className="border border-gray-300 px-3 py-2 text-left">
-                          Nome da Coluna
-                        </th>
-                        <th className="border border-gray-300 px-3 py-2 text-center">
-                          PK
-                        </th>
-                        <th className="border border-gray-300 px-3 py-2 text-center">
-                          FK
-                        </th>
-                        <th className="border border-gray-300 px-3 py-2 text-center">
-                          M
-                        </th>
-                        <th className="border border-gray-300 px-3 py-2 text-left">
-                          Tipo do dado
-                        </th>
-                        <th className="border border-gray-300 px-3 py-2 text-left">
-                          Espécie
-                        </th>
-                        <th className="border border-gray-300 px-3 py-2 text-left">
-                          Origem
-                        </th>
-                        <th className="border border-gray-300 px-3 py-2 text-left">
-                          Fórmula
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {table.fields.map((field) => (
-                        <tr key={field.number} className="hover:bg-gray-50">
-                          <td className="border border-gray-300 px-3 py-2">
-                            {field.number}
-                          </td>
-                          <td className="border border-gray-300 px-3 py-2 font-mono text-xs">
-                            {field.name}
-                          </td>
-                          <td className="border border-gray-300 px-3 py-2 text-center">
-                            {field.isPK}
-                          </td>
-                          <td className="border border-gray-300 px-3 py-2 text-center">
-                            {field.isFK}
-                          </td>
-                          <td className="border border-gray-300 px-3 py-2 text-center">
-                            {field.isMandatory}
-                          </td>
-                          <td className="border border-gray-300 px-3 py-2 font-mono text-xs">
-                            {field.type}
-                          </td>
-                          <td className="border border-gray-300 px-3 py-2 text-xs">
-                            {field.typeCategory}
-                          </td>
-                          <td className="border border-gray-300 px-3 py-2 text-xs">
-                            {field.origin}
-                          </td>
-                          <td className="border border-gray-300 px-3 py-2 font-mono text-xs">
-                            {field.formula}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+        {tables.length > 0 && (
+          <Card>
+            <CardHeader>
+              <div className="flex justify-between items-center">
+                <CardTitle className="text-2xl">
+                  Dicionário de Dados Gerado
+                </CardTitle>
+                <div className="flex gap-3">
+                  <Dialog open={showEditModal} onOpenChange={setShowEditModal}>
+                    <DialogTrigger asChild>
+                      <Button variant="outline">
+                        <Edit3 className="w-4 h-4 mr-2" />
+                        Editar Descrições
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+                      <DialogHeader>
+                        <DialogTitle>Editar Descrições dos Campos</DialogTitle>
+                        <DialogDescription>
+                          Personalize as descrições de todos os campos das
+                          tabelas.
+                        </DialogDescription>
+                      </DialogHeader>
 
-                <h4 className="font-bold text-lg mb-3 text-gray-800">
-                  Descrição das Colunas
-                </h4>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm border-collapse">
-                    <thead>
-                      <tr className="bg-gray-100">
-                        <th className="border border-gray-300 px-3 py-2 text-left">
-                          No.
-                        </th>
-                        <th className="border border-gray-300 px-3 py-2 text-left">
-                          Nome da Coluna
-                        </th>
-                        <th className="border border-gray-300 px-3 py-2 text-left">
-                          Descrição
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {table.fields.map((field) => (
-                        <tr key={field.number} className="hover:bg-gray-50">
-                          <td className="border border-gray-300 px-3 py-2">
-                            {field.number}
-                          </td>
-                          <td className="border border-gray-300 px-3 py-2 font-mono text-xs">
-                            {field.name}
-                          </td>
-                          <td className="border border-gray-300 px-3 py-2 text-xs">
-                            {field.description}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      <div className="space-y-6">
+                        {tables.map((table, tableIdx) => (
+                          <div key={tableIdx} className="space-y-4">
+                            <h4 className="text-lg font-semibold text-foreground bg-muted p-3 rounded">
+                              Tabela: {table.name}
+                            </h4>
+
+                            <div className="space-y-4">
+                              {table.fields.map((field, fieldIdx) => {
+                                const key = `${table.name.toLowerCase()}_${
+                                  field.name
+                                }`;
+                                return (
+                                  <div
+                                    key={fieldIdx}
+                                    className="border rounded-lg p-4"
+                                  >
+                                    <div className="flex items-center gap-4 mb-2">
+                                      <span className="text-sm font-mono bg-muted px-2 py-1 rounded">
+                                        {field.name}
+                                      </span>
+                                      <span className="text-sm text-muted-foreground">
+                                        {field.type}
+                                      </span>
+                                    </div>
+                                    <Textarea
+                                      value={
+                                        editingDescriptions[key] ||
+                                        field.description
+                                      }
+                                      onChange={(e) =>
+                                        handleDescriptionChange(
+                                          table.name.toLowerCase(),
+                                          field.name,
+                                          e.target.value
+                                        )
+                                      }
+                                      placeholder="Digite a descrição do campo..."
+                                      className="w-full"
+                                      rows={2}
+                                    />
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      <DialogFooter>
+                        <Button
+                          variant="outline"
+                          onClick={() => setShowEditModal(false)}
+                        >
+                          Cancelar
+                        </Button>
+                        <Button onClick={handleSaveDescriptions}>
+                          <Save className="w-4 h-4 mr-2" />
+                          Salvar Descrições
+                        </Button>
+                      </DialogFooter>
+                    </DialogContent>
+                  </Dialog>
+
+                  <Button
+                    onClick={handleCopy}
+                    variant={copied ? "default" : "secondary"}
+                  >
+                    {copied ? (
+                      <Check className="w-4 h-4 mr-2" />
+                    ) : (
+                      <Copy className="w-4 h-4 mr-2" />
+                    )}
+                    {copied ? "Copiado!" : "Copiar"}
+                  </Button>
+
+                  <Button onClick={handleDownloadPDF} variant="destructive">
+                    <FileDown className="w-4 h-4 mr-2" />
+                    Exportar PDF
+                  </Button>
                 </div>
               </div>
-            ))}
-          </div>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-8">
+                {tables.map((table, idx) => (
+                  <Card key={idx}>
+                    <CardHeader className="bg-muted/50">
+                      <CardTitle className="text-xl">
+                        Tabela {String(idx + 1).padStart(3, "0")}
+                      </CardTitle>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                        <div>
+                          <p className="text-sm text-muted-foreground">
+                            <span className="font-semibold">
+                              Nome da Tabela:
+                            </span>{" "}
+                            {table.name}
+                          </p>
+                          <p className="text-sm text-muted-foreground">
+                            <span className="font-semibold">Descrição:</span>{" "}
+                            {table.description}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-sm text-muted-foreground">
+                            <span className="font-semibold">
+                              Número de Colunas:
+                            </span>{" "}
+                            {table.columnCount}
+                          </p>
+                          <p className="text-sm text-muted-foreground">
+                            <span className="font-semibold">
+                              Número de Linhas (atual):
+                            </span>{" "}
+                            {table.rowCount}
+                          </p>
+                        </div>
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-3">
+                        PK = Primary Key | FK = Foreign Key | M = Mandatory
+                      </p>
+                    </CardHeader>
+                    <CardContent>
+                      <h4 className="font-bold text-lg mb-3 text-foreground">
+                        Colunas
+                      </h4>
+                      <div className="overflow-x-auto mb-6">
+                        <table className="w-full text-sm border-collapse">
+                          <thead>
+                            <tr className="bg-muted">
+                              <th className="border px-3 py-2 text-left">
+                                No.
+                              </th>
+                              <th className="border px-3 py-2 text-left">
+                                Nome da Coluna
+                              </th>
+                              <th className="border px-3 py-2 text-center">
+                                PK
+                              </th>
+                              <th className="border px-3 py-2 text-center">
+                                FK
+                              </th>
+                              <th className="border px-3 py-2 text-center">
+                                M
+                              </th>
+                              <th className="border px-3 py-2 text-left">
+                                Tipo do dado
+                              </th>
+                              <th className="border px-3 py-2 text-left">
+                                Espécie
+                              </th>
+                              <th className="border px-3 py-2 text-left">
+                                Origem
+                              </th>
+                              <th className="border px-3 py-2 text-left">
+                                Fórmula
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {table.fields.map((field) => (
+                              <tr
+                                key={field.number}
+                                className="hover:bg-muted/50"
+                              >
+                                <td className="border px-3 py-2">
+                                  {field.number}
+                                </td>
+                                <td className="border px-3 py-2 font-mono text-xs">
+                                  {field.name}
+                                </td>
+                                <td className="border px-3 py-2 text-center">
+                                  {field.isPK}
+                                </td>
+                                <td className="border px-3 py-2 text-center">
+                                  {field.isFK}
+                                </td>
+                                <td className="border px-3 py-2 text-center">
+                                  {field.isMandatory}
+                                </td>
+                                <td className="border px-3 py-2 font-mono text-xs">
+                                  {field.type}
+                                </td>
+                                <td className="border px-3 py-2 text-xs">
+                                  {field.typeCategory}
+                                </td>
+                                <td className="border px-3 py-2 text-xs">
+                                  {field.origin}
+                                </td>
+                                <td className="border px-3 py-2 font-mono text-xs">
+                                  {field.formula}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      <h4 className="font-bold text-lg mb-3 text-foreground">
+                        Descrição das Colunas
+                      </h4>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm border-collapse">
+                          <thead>
+                            <tr className="bg-muted">
+                              <th className="border px-3 py-2 text-left">
+                                No.
+                              </th>
+                              <th className="border px-3 py-2 text-left">
+                                Nome da Coluna
+                              </th>
+                              <th className="border px-3 py-2 text-left">
+                                Descrição
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {table.fields.map((field) => (
+                              <tr
+                                key={field.number}
+                                className="hover:bg-muted/50"
+                              >
+                                <td className="border px-3 py-2">
+                                  {field.number}
+                                </td>
+                                <td className="border px-3 py-2 font-mono text-xs">
+                                  {field.name}
+                                </td>
+                                <td className="border px-3 py-2 text-xs">
+                                  {field.description}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
         )}
       </div>
     </div>
